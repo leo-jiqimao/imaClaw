@@ -5,7 +5,7 @@ import {
   RocketOutlined,
   EyeOutlined,
   LikeOutlined,
-  ShareOutlined,
+  ShareAltOutlined,
   FireOutlined,
   ArrowRightOutlined,
 } from '@ant-design/icons';
