@@ -24,22 +24,8 @@ api.interceptors.request.use((config) => {
 export const contentApi = {
   // 生成内容
   generate: async (data: GenerateRequest): Promise<GenerateResponse> => {
-    // TODO: 接入真实API
-    // const response = await api.post('/content/generate', data);
-    // return response.data;
-    
-    // Mock数据
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    return {
-      title: `${data.prompt} | 超详细攻略`,
-      content: `🌟 今天给大家分享${data.prompt}！\\n\\n✨ 重点来了：\\n1. 第一点很重要\\n2. 第二点也很重要\\n3. 第三点最关键\\n\\n💡 小贴士：\\n记得收藏哦！\\n\\n#${data.platform} #种草`,
-      images: [
-        'https://picsum.photos/800/600?random=1',
-        'https://picsum.photos/800/600?random=2',
-      ],
-      tags: ['种草', '攻略', '必看'],
-      suggestedPlatforms: ['xiaohongshu', 'douyin'],
-    };
+    const response = await api.post('/generate', data);
+    return response.data;
   },
 
   // 保存内容
