@@ -51,15 +51,8 @@ export const contentApi = {
 export const publishApi = {
   // 发布内容
   publish: async (data: PublishRequest): Promise<{ success: boolean; message: string }> => {
-    // TODO: 接入真实API
-    // const response = await api.post('/publish', data);
-    // return response.data;
-    
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    return {
-      success: true,
-      message: `发布成功！已发布到 ${data.platforms.join(', ')}`,
-    };
+    const response = await api.post('/publish', data);
+    return response.data;
   },
 
   // 获取发布状态
@@ -72,15 +65,8 @@ export const publishApi = {
 export const hotTopicsApi = {
   // 获取热点话题
   getList: async (): Promise<HotTopic[]> => {
-    // TODO: 接入真实API
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return [
-      { id: '1', title: '早秋穿搭', platform: 'xiaohongshu', heat: 98, category: '时尚', trending: true },
-      { id: '2', title: '减脂餐', platform: 'douyin', heat: 95, category: '美食', trending: true },
-      { id: '3', title: '职场干货', platform: 'wechat', heat: 88, category: '职场', trending: false },
-      { id: '4', title: '旅行攻略', platform: 'xiaohongshu', heat: 92, category: '旅行', trending: true },
-      { id: '5', title: '智能家居', platform: 'douyin', heat: 85, category: '科技', trending: false },
-    ];
+    const response = await api.get('/hot-topics');
+    return response.data;
   },
 };
 
