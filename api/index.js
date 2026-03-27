@@ -128,13 +128,16 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
+  // 处理 URL（Vercel 可能不带 /api 前缀）
+  const url = req.url.replace(/^\/api/, '') || '/';
+  
   // 健康检查
-  if (req.url === '/api/health') {
+  if (url === '/health') {
     return res.json({ status: 'ok', timestamp: new Date().toISOString() });
   }
 
   // AI 生成内容
-  if (req.url === '/api/generate' && req.method === 'POST') {
+  if (url === '/generate' && req.method === 'POST') {
     try {
       const { prompt, platform, style, imageCount } = req.body;
       
@@ -162,7 +165,7 @@ module.exports = async (req, res) => {
   }
 
   // 热点话题
-  if (req.url === '/api/hot-topics' && req.method === 'GET') {
+  if (url === '/hot-topics' && req.method === 'GET') {
     const topics = [
       { id: '1', title: '早秋穿搭', platform: 'xiaohongshu', heat: 98, category: '时尚', trending: true },
       { id: '2', title: '减脂餐', platform: 'douyin', heat: 95, category: '美食', trending: true },
@@ -174,12 +177,12 @@ module.exports = async (req, res) => {
   }
 
   // 保存内容
-  if (req.url === '/api/content' && req.method === 'POST') {
+  if (url === '/content' && req.method === 'POST') {
     return res.json({ id: Date.now().toString(), ...req.body });
   }
 
   // 发布内容
-  if (req.url === '/api/publish' && req.method === 'POST') {
+  if (url === '/publish' && req.method === 'POST') {
     return res.json({ success: true, message: 'Published successfully' });
   }
 
