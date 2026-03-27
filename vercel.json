@@ -1,7 +1,10 @@
 {
   "functions": {
+    "api/health.js": {
+      "maxDuration": 30
+    },
     "api/index.js": {
-      "runtime": "nodejs18.x"
+      "maxDuration": 30
     }
   }
 }
