@@ -1,9 +1,0 @@
-{
-  "framework": "vite",
-  "buildCommand": "cd frontend && npm run build",
-  "outputDirectory": "frontend/dist",
-  "installCommand": "cd frontend && npm install",
-  "env": {
-    "MOONSHOT_API_KEY": "@moonshot_api_key"
-  }
-}
