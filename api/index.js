@@ -1,25 +1,9 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import axios from 'axios';
+const axios = require('axios');
 
 const MOONSHOT_API_KEY = process.env.MOONSHOT_API_KEY;
 const MOONSHOT_API_URL = 'https://api.moonshot.cn/v1/chat/completions';
 
-interface GenerateOptions {
-  prompt: string;
-  platform: string;
-  style: string;
-  imageCount: number;
-}
-
-interface GenerateResult {
-  title: string;
-  content: string;
-  images: string[];
-  tags: string[];
-  suggestedPlatforms: string[];
-}
-
-async function generateContent(options: GenerateOptions): Promise<GenerateResult> {
+async function generateContent(options) {
   const { prompt, platform, style, imageCount } = options;
 
   if (!MOONSHOT_API_KEY) {
@@ -27,7 +11,7 @@ async function generateContent(options: GenerateOptions): Promise<GenerateResult
   }
 
   // 平台提示词映射
-  const platformPrompts: Record<string, string> = {
+  const platformPrompts = {
     xiaohongshu: '小红书风格：亲切、种草、emoji丰富、用"姐妹们"开头',
     douyin: '抖音风格：简短有力、悬念开头、互动性强',
     wechat: '公众号风格：专业、深度、结构清晰',
@@ -91,13 +75,13 @@ async function generateContent(options: GenerateOptions): Promise<GenerateResult
     result.images = generatePlaceholderImages(imageCount);
     
     return result;
-  } catch (error: any) {
+  } catch (error) {
     console.error('Moonshot API error:', error.response?.data || error.message);
     throw new Error('Failed to generate content from AI');
   }
 }
 
-function parseAIResponse(response: string, originalPrompt: string): GenerateResult {
+function parseAIResponse(response, originalPrompt) {
   // 提取标题
   const titleMatch = response.match(/标题：(.+)/);
   const title = titleMatch ? titleMatch[1].trim() : `${originalPrompt} | 超详细攻略`;
@@ -108,7 +92,7 @@ function parseAIResponse(response: string, originalPrompt: string): GenerateResu
 
   // 提取标签
   const tagsMatch = response.match(/标签：(.+)/);
-  let tags: string[] = [];
+  let tags = [];
   if (tagsMatch) {
     tags = tagsMatch[1].split(/[#\s]+/).filter(t => t.trim());
   }
@@ -125,8 +109,8 @@ function parseAIResponse(response: string, originalPrompt: string): GenerateResu
   };
 }
 
-function generatePlaceholderImages(count: number): string[] {
-  const images: string[] = [];
+function generatePlaceholderImages(count) {
+  const images = [];
   for (let i = 0; i < count; i++) {
     // 使用 picsum 作为占位图
     images.push(`https://picsum.photos/800/600?random=${Date.now() + i}`);
@@ -134,7 +118,7 @@ function generatePlaceholderImages(count: number): string[] {
   return images;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+module.exports = async (req, res) => {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -168,7 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
       return res.json(result);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Generate error:', error);
       return res.status(500).json({ 
         error: 'Failed to generate content',
@@ -200,4 +184,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   return res.status(404).json({ error: 'Not found' });
-}
+};
