@@ -1,15 +1,133 @@
 const axios = require('axios');
 const crypto = require('crypto');
 
-// 即梦API配置
-const JIMENG_API_KEY = process.env.JIMENG_ACCESS_KEY_ID;
-const JIMENG_SECRET_KEY = process.env.JIMENG_SECRET_ACCESS_KEY;
-const JIMENG_API_URL = 'https://jimeng-api.volces.com';
+// 火山引擎即梦API配置
+const ACCESS_KEY_ID = process.env.JIMENG_ACCESS_KEY_ID;
+const SECRET_ACCESS_KEY = process.env.JIMENG_SECRET_ACCESS_KEY;
+const API_HOST = 'visual.volcengineapi.com';
+const API_REGION = 'cn-north-1';
+const API_SERVICE = 'cv';
 
-// 生成签名
-function generateSignature(method, uri, queryString, body, secretKey) {
-  const stringToSign = method + '\n' + uri + '\n' + queryString + '\n' + body;
-  return crypto.createHmac('sha256', secretKey).update(stringToSign).digest('hex');
+// 火山引擎签名算法
+function sign(method, uri, queryString, headers, body, secretKey) {
+  const contentType = headers['content-type'] || 'application/json';
+  const contentMD5 = crypto.createHash('md5').update(body).digest('base64');
+  
+  const stringToSign = [
+    method.toUpperCase(),
+    contentMD5,
+    contentType,
+    headers['x-date'],
+    'x-date:' + headers['x-date'],
+    uri + (queryString ? '?' + queryString : '')
+  ].join('\n');
+  
+  const signKey = crypto.createHmac('sha256', secretKey)
+    .update(headers['x-date'].substring(0, 8))
+    .digest('hex');
+  
+  const signature = crypto.createHmac('sha256', signKey)
+    .update(stringToSign)
+    .digest('base64');
+  
+  return signature;
+}
+
+// 提交图片生成任务
+async function submitTask(prompt, count = 3) {
+  const uri = '/';
+  const queryString = 'Action=CVSync2AsyncSubmitTask&Version=2022-08-31';
+  const url = `https://${API_HOST}${uri}?${queryString}`;
+  
+  const body = JSON.stringify({
+    req_key: 'jimeng_t2i_v40',
+    prompt: prompt,
+    size: 2048 * 2048, // 2K分辨率
+    force_single: count === 1,
+    // width: 2048,
+    // height: 2048
+  });
+  
+  const now = new Date().toISOString().replace(/\.[0-9]{3}Z/, 'Z');
+  const headers = {
+    'content-type': 'application/json',
+    'x-date': now,
+    'host': API_HOST
+  };
+  
+  const signature = sign('POST', uri, queryString, headers, body, SECRET_ACCESS_KEY);
+  
+  headers['authorization'] = `HMAC-SHA256 Credential=${ACCESS_KEY_ID}/${now.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=host;x-date, Signature=${signature}`;
+  
+  try {
+    const response = await axios.post(url, body, { headers, timeout: 30000 });
+    
+    if (response.data.code !== 10000) {
+      throw new Error(response.data.message || 'Submit task failed');
+    }
+    
+    return response.data.data.task_id;
+  } catch (error) {
+    console.error('Submit task error:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// 查询任务结果
+async function getResult(taskId) {
+  const uri = '/';
+  const queryString = 'Action=CVSync2AsyncGetResult&Version=2022-08-31';
+  const url = `https://${API_HOST}${uri}?${queryString}`;
+  
+  const body = JSON.stringify({
+    req_key: 'jimeng_t2i_v40',
+    task_id: taskId,
+    req_json: JSON.stringify({ return_url: true })
+  });
+  
+  const now = new Date().toISOString().replace(/\.[0-9]{3}Z/, 'Z');
+  const headers = {
+    'content-type': 'application/json',
+    'x-date': now,
+    'host': API_HOST
+  };
+  
+  const signature = sign('POST', uri, queryString, headers, body, SECRET_ACCESS_KEY);
+  
+  headers['authorization'] = `HMAC-SHA256 Credential=${ACCESS_KEY_ID}/${now.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=host;x-date, Signature=${signature}`;
+  
+  try {
+    const response = await axios.post(url, body, { headers, timeout: 30000 });
+    
+    if (response.data.code !== 10000) {
+      throw new Error(response.data.message || 'Get result failed');
+    }
+    
+    return response.data.data;
+  } catch (error) {
+    console.error('Get result error:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// 等待任务完成
+async function waitForResult(taskId, maxAttempts = 30) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = await getResult(taskId);
+    
+    if (result.status === 'done') {
+      return result;
+    }
+    
+    if (result.status === 'failed' || result.status === 'expired') {
+      throw new Error(`Task ${result.status}`);
+    }
+    
+    // 等待2秒再查询
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  
+  throw new Error('Task timeout');
 }
 
 module.exports = async (req, res) => {
@@ -26,72 +144,49 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // 检查API Key
-  if (!JIMENG_API_KEY || !JIMENG_SECRET_KEY) {
+  if (!ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
     return res.status(500).json({ 
       error: 'API keys not configured',
-      message: 'Please set JIMENG_ACCESS_KEY_ID and JIMENG_SECRET_ACCESS_KEY environment variables'
+      message: 'Please set JIMENG_ACCESS_KEY_ID and JIMENG_SECRET_ACCESS_KEY'
     });
   }
 
   try {
-    const { prompt, width = 1024, height = 1024, count = 3 } = req.body;
+    const { prompt, count = 3 } = req.body;
     
     if (!prompt) {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    // 调用即梦API生成图片
-    const timestamp = Date.now().toString();
-    const uri = '/api/v1/images/generations';
-    const body = JSON.stringify({
-      prompt: prompt,
-      width: width,
-      height: height,
-      count: count,
-      style: 'photography'
-    });
-
-    // 生成签名
-    const signature = generateSignature('POST', uri, '', body, JIMENG_SECRET_KEY);
-
-    const response = await axios.post(
-      `${JIMENG_API_URL}${uri}`,
-      {
-        prompt: prompt,
-        width: width,
-        height: height,
-        count: count,
-        style: 'photography'
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${JIMENG_API_KEY}`,
-          'X-Signature': signature,
-          'X-Timestamp': timestamp
-        },
-        timeout: 60000
-      }
-    );
-
-    // 返回生成的图片URL
-    const images = response.data.data?.images || [];
+    console.log('Generating images for:', prompt);
+    
+    // 1. 提交任务
+    const taskId = await submitTask(prompt, count);
+    console.log('Task submitted:', taskId);
+    
+    // 2. 等待任务完成
+    const result = await waitForResult(taskId);
+    console.log('Task completed:', result.status);
+    
+    // 3. 返回图片URL
+    const images = result.image_urls || [];
     
     return res.json({
       success: true,
       prompt: prompt,
-      images: images.map((img, index) => ({
+      task_id: taskId,
+      images: images.map((url, index) => ({
         id: index + 1,
-        url: img.url,
-        width: img.width || width,
-        height: img.height || height
+        url: url,
+        width: 2048,
+        height: 2048
       }))
     });
-  } catch (error) {
-    console.error('Image generation error:', error.response?.data || error.message);
     
-    // 如果API调用失败，返回占位图
+  } catch (error) {
+    console.error('Image generation error:', error.message);
+    
+    // 返回备用图片
     return res.json({
       success: true,
       prompt: req.body.prompt,
@@ -100,7 +195,8 @@ module.exports = async (req, res) => {
         { id: 2, url: `https://picsum.photos/1024/1024?random=${Date.now()+1}`, width: 1024, height: 1024 },
         { id: 3, url: `https://picsum.photos/1024/1024?random=${Date.now()+2}`, width: 1024, height: 1024 }
       ],
-      note: 'Using placeholder images due to API error'
+      note: 'Using placeholder images',
+      error: error.message
     });
   }
 };
