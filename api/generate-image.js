@@ -216,7 +216,7 @@ async function waitForSingleResult(taskId, credentials, maxAttempts = 40) {
 async function generateMultipleImages(prompt, count, credentials) {
   console.log(`Generating ${count} images with batch processing...`);
   
-  const MAX_CONCURRENT = 3; // 最多 3 个并行任务
+  const MAX_CONCURRENT = 1; // 串行生成，避免并发问题
   const images = [];
   
   // 分批处理
