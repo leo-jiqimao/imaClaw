@@ -18,7 +18,7 @@ function getCredentials() {
   return { accessKeyId, secretAccessKey };
 }
 
-// 获取当前UTC时间（火山引擎格式：YYYYMMDD'T'HHMMSS'Z'）
+// 获取当前UTC时间
 function getXDate() {
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -43,7 +43,7 @@ function getSigningSecretKey(sk, date, region, service) {
   return hmacSha256(kService, 'request');
 }
 
-// URL encode (保留某些字符不编码)
+// URL encode
 function urlEncode(str) {
   return encodeURIComponent(str).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 }
@@ -58,12 +58,10 @@ function canonicalQuery(query) {
   return pairs.map(([k, v]) => `${k}=${v}`).join('&');
 }
 
-// 火山引擎签名算法 (V4)
-function sign(method, path, query, headers, body, ak, sk, region, service) {
-  // 计算 body hash
+// 签名函数
+function sign(method, path, query, headers, body, accessKey, secretKey, region, service) {
   const bodyHash = crypto.createHash('sha256').update(body).digest('hex');
   
-  // 收集 signed headers (不包括 X-Content-Sha256)
   const signedHeaders = {};
   for (const [key, value] of Object.entries(headers)) {
     const lowerKey = key.toLowerCase();
@@ -73,7 +71,6 @@ function sign(method, path, query, headers, body, ak, sk, region, service) {
     }
   }
   
-  // 处理 host (去掉端口 80/443)
   if (signedHeaders.host) {
     const hostParts = signedHeaders.host.split(':');
     if (hostParts[1] === '80' || hostParts[1] === '443') {
@@ -81,7 +78,6 @@ function sign(method, path, query, headers, body, ak, sk, region, service) {
     }
   }
   
-  // 构造 signed headers string
   const sortedKeys = Object.keys(signedHeaders).sort();
   let signedHeadersStr = '';
   for (const key of sortedKeys) {
@@ -89,7 +85,6 @@ function sign(method, path, query, headers, body, ak, sk, region, service) {
   }
   const signedHeadersNames = sortedKeys.join(';');
   
-  // 构造 canonical request
   const canonicalRequest = [
     method.toUpperCase(),
     path,
@@ -99,9 +94,6 @@ function sign(method, path, query, headers, body, ak, sk, region, service) {
     bodyHash
   ].join('\n');
   
-  console.log('Canonical Request:\n', canonicalRequest, '\n---');
-  
-  // 构造 string to sign
   const xDate = headers['X-Date'];
   const credentialScope = `${xDate.substring(0, 8)}/${region}/${service}/request`;
   const stringToSign = [
@@ -111,21 +103,17 @@ function sign(method, path, query, headers, body, ak, sk, region, service) {
     crypto.createHash('sha256').update(canonicalRequest).digest('hex')
   ].join('\n');
   
-  console.log('String to Sign:\n', stringToSign, '\n---');
-  
-  // 计算签名
-  const signingKey = getSigningSecretKey(sk, xDate.substring(0, 8), region, service);
+  const signingKey = getSigningSecretKey(secretKey, xDate.substring(0, 8), region, service);
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
   
-  // 构造 Authorization header
-  const credential = `${ak}/${credentialScope}`;
+  const credential = `${accessKey}/${credentialScope}`;
   const authorization = `HMAC-SHA256 Credential=${credential}, SignedHeaders=${signedHeadersNames}, Signature=${signature}`;
   
   return { authorization, bodyHash };
 }
 
-// 提交图片生成任务
-async function submitTask(prompt, count = 1, credentials) {
+// 提交单个图片生成任务（force_single=true）
+async function submitSingleTask(prompt, credentials) {
   const path = '/';
   const query = {
     Action: 'CVSync2AsyncSubmitTask',
@@ -133,16 +121,11 @@ async function submitTask(prompt, count = 1, credentials) {
   };
   const url = `https://${API_HOST}${path}`;
   
-  // 根据 count 调整 prompt，明确指定生成数量
-  const enhancedPrompt = count > 1 
-    ? `${prompt}，生成${count}张不同角度的图片`
-    : prompt;
-  
   const body = JSON.stringify({
     req_key: 'jimeng_t2i_v40',
-    prompt: enhancedPrompt,
+    prompt: prompt,
     size: 2048 * 2048,
-    force_single: count === 1,
+    force_single: true, // 强制生成单张图，速度更快
   });
   
   const xDate = getXDate();
@@ -161,21 +144,13 @@ async function submitTask(prompt, count = 1, credentials) {
   const queryString = Object.entries(query).map(([k, v]) => `${k}=${v}`).join('&');
   const fullUrl = `${url}?${queryString}`;
   
-  try {
-    console.log('Request URL:', fullUrl);
-    console.log('Headers:', JSON.stringify(headers, null, 2));
-    const response = await axios.post(fullUrl, body, { headers, timeout: 30000 });
-    console.log('Response:', JSON.stringify(response.data));
-    
-    if (response.data.code !== 10000) {
-      throw new Error(response.data.message || 'Submit task failed');
-    }
-    
-    return response.data.data.task_id;
-  } catch (error) {
-    console.error('Submit task error:', error.response?.data || error.message);
-    throw error;
+  const response = await axios.post(fullUrl, body, { headers, timeout: 30000 });
+  
+  if (response.data.code !== 10000) {
+    throw new Error(response.data.message || 'Submit task failed');
   }
+  
+  return response.data.data.task_id;
 }
 
 // 查询任务结果
@@ -209,27 +184,18 @@ async function getResult(taskId, credentials) {
   const queryString = Object.entries(query).map(([k, v]) => `${k}=${v}`).join('&');
   const fullUrl = `${url}?${queryString}`;
   
-  try {
-    const response = await axios.post(fullUrl, body, { headers, timeout: 30000 });
-    
-    if (response.data.code !== 10000) {
-      throw new Error(response.data.message || 'Get result failed');
-    }
-    
-    return response.data.data;
-  } catch (error) {
-    console.error('Get result error:', error.response?.data || error.message);
-    throw error;
+  const response = await axios.post(fullUrl, body, { headers, timeout: 30000 });
+  
+  if (response.data.code !== 10000) {
+    throw new Error(response.data.message || 'Get result failed');
   }
+  
+  return response.data.data;
 }
 
-// 等待任务完成
-async function waitForResult(taskId, credentials, count = 1, maxAttempts = 150) {
-  // 根据图片数量调整超时时间（每张图约需15-20秒）
-  const estimatedTime = Math.max(30, count * 20);
-  const actualMaxAttempts = Math.max(maxAttempts, estimatedTime / 2);
-  
-  for (let i = 0; i < actualMaxAttempts; i++) {
+// 等待单个任务完成
+async function waitForSingleResult(taskId, credentials, maxAttempts = 40) {
+  for (let i = 0; i < maxAttempts; i++) {
     const result = await getResult(taskId, credentials);
     
     if (result.status === 'done') {
@@ -240,11 +206,49 @@ async function waitForResult(taskId, credentials, count = 1, maxAttempts = 150) 
       throw new Error(`Task ${result.status}`);
     }
     
-    // 等待2秒再查询
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   
-  throw new Error(`Task timeout after ${actualMaxAttempts * 2} seconds. Generated ${count} images takes longer than expected.`);
+  throw new Error('Task timeout');
+}
+
+// 并行生成多张图片（每个任务单独生成一张）
+async function generateMultipleImages(prompt, count, credentials) {
+  console.log(`Generating ${count} images in parallel...`);
+  
+  // 提交所有任务
+  const taskPromises = [];
+  for (let i = 0; i < count; i++) {
+    const enhancedPrompt = count > 1 
+      ? `${prompt}，第${i + 1}张，不同角度`
+      : prompt;
+    taskPromises.push(submitSingleTask(enhancedPrompt, credentials));
+  }
+  
+  const taskIds = await Promise.all(taskPromises);
+  console.log('Task IDs:', taskIds);
+  
+  // 等待所有任务完成
+  const resultPromises = taskIds.map(taskId => 
+    waitForSingleResult(taskId, credentials)
+  );
+  
+  const results = await Promise.all(resultPromises);
+  
+  // 收集所有图片
+  const images = [];
+  results.forEach((result, index) => {
+    if (result.image_urls && result.image_urls.length > 0) {
+      images.push({
+        id: index + 1,
+        url: result.image_urls[0],
+        width: 2048,
+        height: 2048,
+      });
+    }
+  });
+  
+  return images;
 }
 
 module.exports = async (req, res) => {
@@ -269,42 +273,35 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    console.log('Generating images for:', prompt);
+    console.log('Generating images for:', prompt, 'count:', count);
 
-    // 1. 提交任务
-    const taskId = await submitTask(prompt, count, credentials);
-    console.log('Task submitted:', taskId);
-
-    // 2. 等待任务完成（根据图片数量调整超时）
-    const result = await waitForResult(taskId, credentials, count);
-    console.log('Task completed:', result.status, 'images:', result.image_urls?.length || 0);
-
-    // 3. 返回图片URL
-    const images = result.image_urls || [];
+    // 限制最大数量为 9
+    const actualCount = Math.min(count, 9);
+    
+    // 并行生成多张图片
+    const images = await generateMultipleImages(prompt, actualCount, credentials);
+    
+    console.log(`Generated ${images.length} images`);
 
     return res.json({
       success: true,
       prompt: prompt,
-      task_id: taskId,
-      images: images.map((url, index) => ({
-        id: index + 1,
-        url: url,
-        width: 2048,
-        height: 2048,
-      })),
+      images: images,
     });
   } catch (error) {
     console.error('Image generation error:', error.message);
 
     // 返回备用图片
+    const count = req.body.count || 1;
     return res.json({
       success: true,
       prompt: req.body.prompt,
-      images: [
-        { id: 1, url: `https://picsum.photos/1024/1024?random=${Date.now()}`, width: 1024, height: 1024 },
-        { id: 2, url: `https://picsum.photos/1024/1024?random=${Date.now() + 1}`, width: 1024, height: 1024 },
-        { id: 3, url: `https://picsum.photos/1024/1024?random=${Date.now() + 2}`, width: 1024, height: 1024 },
-      ],
+      images: Array.from({ length: Math.min(count, 9) }, (_, i) => ({
+        id: i + 1,
+        url: `https://picsum.photos/1024/1024?random=${Date.now() + i}`,
+        width: 1024,
+        height: 1024,
+      })),
       note: 'Using placeholder images',
       error: error.message,
     });
