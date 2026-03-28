@@ -91,6 +91,9 @@ const Create: React.FC = () => {
           prompt: response.imagePrompt || prompt,
           count: imageCount,
         });
+        console.log('Image API response:', imageResponse);
+        console.log('Images array:', imageResponse.images);
+        console.log('First image URL:', imageResponse.images[0]?.url);
         setGeneratedImages(imageResponse);
         if (imageResponse.note) {
           message.warning(imageResponse.note);
