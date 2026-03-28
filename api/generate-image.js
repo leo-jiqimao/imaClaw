@@ -63,11 +63,12 @@ function sign(method, path, query, headers, body, ak, sk, region, service) {
   // 计算 body hash
   const bodyHash = crypto.createHash('sha256').update(body).digest('hex');
   
-  // 收集 signed headers
+  // 收集 signed headers (不包括 X-Content-Sha256)
   const signedHeaders = {};
   for (const [key, value] of Object.entries(headers)) {
     const lowerKey = key.toLowerCase();
-    if (key === 'Content-Type' || key === 'Content-Md5' || key === 'Host' || key.startsWith('X-')) {
+    if (key === 'Content-Type' || key === 'Content-Md5' || key === 'Host' || 
+        (key.startsWith('X-') && key !== 'X-Content-Sha256')) {
       signedHeaders[lowerKey] = value;
     }
   }
