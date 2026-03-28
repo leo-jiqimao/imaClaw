@@ -224,9 +224,9 @@ async function getResult(taskId, credentials) {
 }
 
 // 等待任务完成
-async function waitForResult(taskId, credentials, count = 1, maxAttempts = 60) {
-  // 根据图片数量调整超时时间（每张图约需10-15秒）
-  const estimatedTime = Math.max(30, count * 15);
+async function waitForResult(taskId, credentials, count = 1, maxAttempts = 150) {
+  // 根据图片数量调整超时时间（每张图约需15-20秒）
+  const estimatedTime = Math.max(30, count * 20);
   const actualMaxAttempts = Math.max(maxAttempts, estimatedTime / 2);
   
   for (let i = 0; i < actualMaxAttempts; i++) {
@@ -244,7 +244,7 @@ async function waitForResult(taskId, credentials, count = 1, maxAttempts = 60) {
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   
-  throw new Error(`Task timeout after ${actualMaxAttempts * 2} seconds`);
+  throw new Error(`Task timeout after ${actualMaxAttempts * 2} seconds. Generated ${count} images takes longer than expected.`);
 }
 
 module.exports = async (req, res) => {

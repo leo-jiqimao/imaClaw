@@ -13,7 +13,7 @@
       "maxDuration": 60
     },
     "api/generate-image.js": {
-      "maxDuration": 300
+      "maxDuration": 900
     },
     "api/hot-topics.js": {
       "maxDuration": 30
