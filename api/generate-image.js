@@ -16,9 +16,6 @@ function getCredentials() {
     ? Buffer.from(secretKeyRaw, 'base64').toString('utf-8')
     : secretKeyRaw;
 
-  console.log('AccessKeyId:', accessKeyId ? '已设置' : '未设置');
-  console.log('SecretAccessKey:', secretAccessKey ? '已设置' : '未设置');
-
   if (!accessKeyId || !secretAccessKey) {
     throw new Error('Missing JIMENG_ACCESS_KEY_ID or JIMENG_SECRET_ACCESS_KEY');
   }
@@ -26,29 +23,46 @@ function getCredentials() {
   return { accessKeyId, secretAccessKey };
 }
 
+// 获取当前UTC时间（火山引擎格式：YYYYMMDD'T'HHMMSS'Z'）
+function getXDate() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  const hours = String(now.getUTCHours()).padStart(2, '0');
+  const minutes = String(now.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(now.getUTCSeconds()).padStart(2, '0');
+  return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
+}
+
 // 火山引擎签名算法 (HMAC-SHA256)
 function sign(method, uri, queryString, headers, body, secretKey) {
   const contentType = headers['content-type'] || 'application/json';
-  const contentMD5 = crypto.createHash('md5').update(body).digest('base64');
   
+  // 计算 x-content-sha256
+  const contentSha256 = crypto.createHash('sha256').update(body).digest('hex');
+  
+  // 构造 stringToSign
   const stringToSign = [
     method.toUpperCase(),
-    contentMD5,
+    contentSha256,
     contentType,
     headers['x-date'],
-    'x-date:' + headers['x-date'],
+    `x-date:${headers['x-date']}`,
     uri + (queryString ? '?' + queryString : '')
   ].join('\n');
   
-  const signKey = crypto.createHmac('sha256', secretKey)
-    .update(headers['x-date'].substring(0, 8))
-    .digest('hex');
+  // 计算 signing key
+  const shortDate = headers['x-date'].substring(0, 8);
+  const kDate = crypto.createHmac('sha256', secretKey).update(shortDate).digest();
+  const kRegion = crypto.createHmac('sha256', kDate).update(API_REGION).digest();
+  const kService = crypto.createHmac('sha256', kRegion).update(API_SERVICE).digest();
+  const kSigning = crypto.createHmac('sha256', kService).update('request').digest();
   
-  const signature = crypto.createHmac('sha256', signKey)
-    .update(stringToSign)
-    .digest('base64');
+  // 计算签名
+  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
   
-  return signature;
+  return { signature, contentSha256, stringToSign };
 }
 
 // 提交图片生成任务
@@ -64,19 +78,22 @@ async function submitTask(prompt, count = 1, credentials) {
     force_single: count === 1,
   });
   
-  const now = new Date().toISOString().replace(/\.[0-9]{3}Z/, 'Z');
+  const xDate = getXDate();
   const headers = {
     'content-type': 'application/json',
-    'x-date': now,
+    'x-date': xDate,
     'host': API_HOST
   };
   
-  const signature = sign('POST', uri, queryString, headers, body, credentials.secretAccessKey);
+  const { signature, contentSha256 } = sign('POST', uri, queryString, headers, body, credentials.secretAccessKey);
   
-  headers['authorization'] = `HMAC-SHA256 Credential=${credentials.accessKeyId}/${now.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=host;x-date, Signature=${signature}`;
+  // 添加 x-content-sha256 header
+  headers['x-content-sha256'] = contentSha256;
+  
+  headers['authorization'] = `HMAC-SHA256 Credential=${credentials.accessKeyId}/${xDate.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=content-type;host;x-content-sha256;x-date, Signature=${signature}`;
   
   try {
-    console.log('Submitting task...');
+    console.log('Submitting task with x-date:', xDate);
     const response = await axios.post(url, body, { headers, timeout: 30000 });
     console.log('Submit response:', JSON.stringify(response.data));
     
@@ -103,16 +120,17 @@ async function getResult(taskId, credentials) {
     req_json: JSON.stringify({ return_url: true })
   });
   
-  const now = new Date().toISOString().replace(/\.[0-9]{3}Z/, 'Z');
+  const xDate = getXDate();
   const headers = {
     'content-type': 'application/json',
-    'x-date': now,
+    'x-date': xDate,
     'host': API_HOST
   };
   
-  const signature = sign('POST', uri, queryString, headers, body, credentials.secretAccessKey);
+  const { signature, contentSha256 } = sign('POST', uri, queryString, headers, body, credentials.secretAccessKey);
   
-  headers['authorization'] = `HMAC-SHA256 Credential=${credentials.accessKeyId}/${now.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=host;x-date, Signature=${signature}`;
+  headers['x-content-sha256'] = contentSha256;
+  headers['authorization'] = `HMAC-SHA256 Credential=${credentials.accessKeyId}/${xDate.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=content-type;host;x-content-sha256;x-date, Signature=${signature}`;
   
   try {
     const response = await axios.post(url, body, { headers, timeout: 30000 });
