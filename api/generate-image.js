@@ -30,50 +30,107 @@ function getXDate() {
   return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
 }
 
-// 火山引擎签名算法 (HMAC-SHA256)
-// 参考: https://www.volcengine.com/docs/6369/67268
-function sign(method, uri, queryString, headers, body, secretKey) {
-  // 计算 x-content-sha256
-  const contentSha256 = crypto.createHash('sha256').update(body).digest('hex');
+// HMAC-SHA256
+function hmacSha256(key, msg) {
+  return crypto.createHmac('sha256', key).update(msg).digest();
+}
+
+// 获取 Signing Key
+function getSigningSecretKey(sk, date, region, service) {
+  const kDate = hmacSha256(sk, date);
+  const kRegion = hmacSha256(kDate, region);
+  const kService = hmacSha256(kRegion, service);
+  return hmacSha256(kService, 'request');
+}
+
+// URL encode (保留某些字符不编码)
+function urlEncode(str) {
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+// 构造 canonical query string
+function canonicalQuery(query) {
+  const pairs = [];
+  for (const [key, value] of Object.entries(query)) {
+    pairs.push([urlEncode(key), urlEncode(String(value))]);
+  }
+  pairs.sort((a, b) => a[0].localeCompare(b[0]));
+  return pairs.map(([k, v]) => `${k}=${v}`).join('&');
+}
+
+// 火山引擎签名算法 (V4)
+function sign(method, path, query, headers, body, ak, sk, region, service) {
+  // 计算 body hash
+  const bodyHash = crypto.createHash('sha256').update(body).digest('hex');
   
-  // 定义参与签名的 headers（按字母顺序排序）
-  const signedHeaders = ['content-type', 'host', 'x-content-sha256', 'x-date'];
+  // 收集 signed headers
+  const signedHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lowerKey = key.toLowerCase();
+    if (key === 'Content-Type' || key === 'Content-Md5' || key === 'Host' || key.startsWith('X-')) {
+      signedHeaders[lowerKey] = value;
+    }
+  }
   
-  // 构造 canonical headers
-  const canonicalHeaders = signedHeaders
-    .map(name => `${name}:${headers[name]}`)
-    .join('\n') + '\n';
+  // 处理 host (去掉端口 80/443)
+  if (signedHeaders.host) {
+    const hostParts = signedHeaders.host.split(':');
+    if (hostParts[1] === '80' || hostParts[1] === '443') {
+      signedHeaders.host = hostParts[0];
+    }
+  }
   
-  // 构造 stringToSign
-  const stringToSign = [
+  // 构造 signed headers string
+  const sortedKeys = Object.keys(signedHeaders).sort();
+  let signedHeadersStr = '';
+  for (const key of sortedKeys) {
+    signedHeadersStr += `${key}:${signedHeaders[key]}\n`;
+  }
+  const signedHeadersNames = sortedKeys.join(';');
+  
+  // 构造 canonical request
+  const canonicalRequest = [
     method.toUpperCase(),
-    contentSha256,
-    headers['content-type'],
-    headers['x-date'],
-    canonicalHeaders,
-    uri + (queryString ? '?' + queryString : '')
+    path,
+    canonicalQuery(query),
+    signedHeadersStr,
+    signedHeadersNames,
+    bodyHash
   ].join('\n');
   
-  console.log('StringToSign:\n' + stringToSign + '\n---');
+  console.log('Canonical Request:\n', canonicalRequest, '\n---');
   
-  // 计算 signing key
-  const shortDate = headers['x-date'].substring(0, 8);
-  const kDate = crypto.createHmac('sha256', secretKey).update(shortDate).digest();
-  const kRegion = crypto.createHmac('sha256', kDate).update(API_REGION).digest();
-  const kService = crypto.createHmac('sha256', kRegion).update(API_SERVICE).digest();
-  const kSigning = crypto.createHmac('sha256', kService).update('request').digest();
+  // 构造 string to sign
+  const xDate = headers['X-Date'];
+  const credentialScope = `${xDate.substring(0, 8)}/${region}/${service}/request`;
+  const stringToSign = [
+    'HMAC-SHA256',
+    xDate,
+    credentialScope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex')
+  ].join('\n');
+  
+  console.log('String to Sign:\n', stringToSign, '\n---');
   
   // 计算签名
-  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+  const signingKey = getSigningSecretKey(sk, xDate.substring(0, 8), region, service);
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
   
-  return { signature, contentSha256, stringToSign, signedHeaders: signedHeaders.join(';') };
+  // 构造 Authorization header
+  const credential = `${ak}/${credentialScope}`;
+  const authorization = `HMAC-SHA256 Credential=${credential}, SignedHeaders=${signedHeadersNames}, Signature=${signature}`;
+  
+  return { authorization, bodyHash };
 }
 
 // 提交图片生成任务
 async function submitTask(prompt, count = 1, credentials) {
-  const uri = '/';
-  const queryString = 'Action=CVSync2AsyncSubmitTask&Version=2022-08-31';
-  const url = `https://${API_HOST}${uri}?${queryString}`;
+  const path = '/';
+  const query = {
+    Action: 'CVSync2AsyncSubmitTask',
+    Version: '2022-08-31'
+  };
+  const url = `https://${API_HOST}${path}`;
   
   const body = JSON.stringify({
     req_key: 'jimeng_t2i_v40',
@@ -84,23 +141,25 @@ async function submitTask(prompt, count = 1, credentials) {
   
   const xDate = getXDate();
   const headers = {
-    'content-type': 'application/json',
-    'x-date': xDate,
-    'host': API_HOST
+    'Content-Type': 'application/json',
+    'Host': API_HOST,
+    'X-Date': xDate
   };
   
-  // 先计算 content-sha256，然后添加到 headers
-  const contentSha256 = crypto.createHash('sha256').update(body).digest('hex');
-  headers['x-content-sha256'] = contentSha256;
+  const { authorization, bodyHash } = sign('POST', path, query, headers, body, 
+    credentials.accessKeyId, credentials.secretAccessKey, API_REGION, API_SERVICE);
   
-  const { signature, signedHeaders } = sign('POST', uri, queryString, headers, body, credentials.secretAccessKey);
+  headers['X-Content-Sha256'] = bodyHash;
+  headers['Authorization'] = authorization;
   
-  headers['authorization'] = `HMAC-SHA256 Credential=${credentials.accessKeyId}/${xDate.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const queryString = Object.entries(query).map(([k, v]) => `${k}=${v}`).join('&');
+  const fullUrl = `${url}?${queryString}`;
   
   try {
-    console.log('Submitting task with x-date:', xDate);
-    const response = await axios.post(url, body, { headers, timeout: 30000 });
-    console.log('Submit response:', JSON.stringify(response.data));
+    console.log('Request URL:', fullUrl);
+    console.log('Headers:', JSON.stringify(headers, null, 2));
+    const response = await axios.post(fullUrl, body, { headers, timeout: 30000 });
+    console.log('Response:', JSON.stringify(response.data));
     
     if (response.data.code !== 10000) {
       throw new Error(response.data.message || 'Submit task failed');
@@ -115,9 +174,12 @@ async function submitTask(prompt, count = 1, credentials) {
 
 // 查询任务结果
 async function getResult(taskId, credentials) {
-  const uri = '/';
-  const queryString = 'Action=CVSync2AsyncGetResult&Version=2022-08-31';
-  const url = `https://${API_HOST}${uri}?${queryString}`;
+  const path = '/';
+  const query = {
+    Action: 'CVSync2AsyncGetResult',
+    Version: '2022-08-31'
+  };
+  const url = `https://${API_HOST}${path}`;
   
   const body = JSON.stringify({
     req_key: 'jimeng_t2i_v40',
@@ -127,20 +189,22 @@ async function getResult(taskId, credentials) {
   
   const xDate = getXDate();
   const headers = {
-    'content-type': 'application/json',
-    'x-date': xDate,
-    'host': API_HOST
+    'Content-Type': 'application/json',
+    'Host': API_HOST,
+    'X-Date': xDate
   };
   
-  const contentSha256 = crypto.createHash('sha256').update(body).digest('hex');
-  headers['x-content-sha256'] = contentSha256;
+  const { authorization, bodyHash } = sign('POST', path, query, headers, body,
+    credentials.accessKeyId, credentials.secretAccessKey, API_REGION, API_SERVICE);
   
-  const { signature, signedHeaders } = sign('POST', uri, queryString, headers, body, credentials.secretAccessKey);
+  headers['X-Content-Sha256'] = bodyHash;
+  headers['Authorization'] = authorization;
   
-  headers['authorization'] = `HMAC-SHA256 Credential=${credentials.accessKeyId}/${xDate.substring(0, 8)}/${API_REGION}/${API_SERVICE}/request, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const queryString = Object.entries(query).map(([k, v]) => `${k}=${v}`).join('&');
+  const fullUrl = `${url}?${queryString}`;
   
   try {
-    const response = await axios.post(url, body, { headers, timeout: 30000 });
+    const response = await axios.post(fullUrl, body, { headers, timeout: 30000 });
     
     if (response.data.code !== 10000) {
       throw new Error(response.data.message || 'Get result failed');
