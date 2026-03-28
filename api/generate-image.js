@@ -224,8 +224,12 @@ async function getResult(taskId, credentials) {
 }
 
 // 等待任务完成
-async function waitForResult(taskId, credentials, maxAttempts = 30) {
-  for (let i = 0; i < maxAttempts; i++) {
+async function waitForResult(taskId, credentials, count = 1, maxAttempts = 60) {
+  // 根据图片数量调整超时时间（每张图约需10-15秒）
+  const estimatedTime = Math.max(30, count * 15);
+  const actualMaxAttempts = Math.max(maxAttempts, estimatedTime / 2);
+  
+  for (let i = 0; i < actualMaxAttempts; i++) {
     const result = await getResult(taskId, credentials);
     
     if (result.status === 'done') {
@@ -240,7 +244,7 @@ async function waitForResult(taskId, credentials, maxAttempts = 30) {
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   
-  throw new Error('Task timeout');
+  throw new Error(`Task timeout after ${actualMaxAttempts * 2} seconds`);
 }
 
 module.exports = async (req, res) => {
@@ -271,9 +275,9 @@ module.exports = async (req, res) => {
     const taskId = await submitTask(prompt, count, credentials);
     console.log('Task submitted:', taskId);
 
-    // 2. 等待任务完成
-    const result = await waitForResult(taskId, credentials);
-    console.log('Task completed:', result.status);
+    // 2. 等待任务完成（根据图片数量调整超时）
+    const result = await waitForResult(taskId, credentials, count);
+    console.log('Task completed:', result.status, 'images:', result.image_urls?.length || 0);
 
     // 3. 返回图片URL
     const images = result.image_urls || [];
