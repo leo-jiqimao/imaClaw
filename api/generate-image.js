@@ -90,6 +90,8 @@ async function submitTask(prompt, count = 1, credentials) {
   
   try {
     console.log('Submitting task with x-date:', xDate);
+    console.log('Headers:', JSON.stringify(headers));
+    console.log('Body:', body);
     const response = await axios.post(url, body, { headers, timeout: 30000 });
     console.log('Submit response:', JSON.stringify(response.data));
     
