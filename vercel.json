@@ -3,6 +3,9 @@
     "api/health.js": {
       "maxDuration": 30
     },
+    "api/debug-env.js": {
+      "maxDuration": 30
+    },
     "api/index.js": {
       "maxDuration": 30
     },
