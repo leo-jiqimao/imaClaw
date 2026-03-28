@@ -27,6 +27,7 @@ import {
 } from '@ant-design/icons';
 import { contentApi } from '../services/api';
 import type { GenerateRequest, GenerateResponse } from '../types';
+import type { GenerateImageResponse } from '../services/api';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -37,7 +38,9 @@ const Create: React.FC = () => {
   const [style, setStyle] = useState('种草');
   const [imageCount, setImageCount] = useState(3);
   const [loading, setLoading] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
   const [result, setResult] = useState<GenerateResponse | null>(null);
+  const [generatedImages, setGeneratedImages] = useState<GenerateImageResponse | null>(null);
   const [saved, setSaved] = useState(false);
 
   const platforms = [
@@ -65,9 +68,12 @@ const Create: React.FC = () => {
     }
 
     setLoading(true);
+    setImageLoading(true);
     setSaved(false);
+    setGeneratedImages(null);
     
     try {
+      // 1. 生成文案
       const request: GenerateRequest = {
         prompt,
         platform,
@@ -77,11 +83,29 @@ const Create: React.FC = () => {
       
       const response = await contentApi.generate(request);
       setResult(response);
-      message.success('内容生成成功！');
+      message.success('文案生成成功！');
+      
+      // 2. 生成图片（并行）
+      try {
+        const imageResponse = await contentApi.generateImage({
+          prompt: response.imagePrompt || prompt,
+          count: imageCount,
+        });
+        setGeneratedImages(imageResponse);
+        if (imageResponse.note) {
+          message.warning(imageResponse.note);
+        } else {
+          message.success('图片生成成功！');
+        }
+      } catch (imageError) {
+        console.error('图片生成失败:', imageError);
+        message.warning('图片生成失败，已使用备用图片');
+      }
     } catch (error) {
       message.error('生成失败，请重试');
     } finally {
       setLoading(false);
+      setImageLoading(false);
     }
   };
 
@@ -111,6 +135,7 @@ const Create: React.FC = () => {
   };
 
   const handleRegenerate = () => {
+    setGeneratedImages(null);
     handleGenerate();
   };
 
@@ -314,13 +339,14 @@ const Create: React.FC = () => {
                 <div>
                   <label style={{ display: 'block', marginBottom: 8, fontWeight: 500 }}>
                     <PictureOutlined /> 配图
+                    {imageLoading && <Spin size="small" style={{ marginLeft: 8 }} />}
                   </label>
                   <Image.PreviewGroup>
                     <Space wrap>
-                      {result.images.map((img, index) => (
+                      {(generatedImages?.images || result.images.map((url, i) => ({ id: i, url, width: 1024, height: 1024 }))).map((img, index) => (
                         <Image
                           key={index}
-                          src={img}
+                          src={img.url}
                           width={120}
                           height={120}
                           style={{ borderRadius: 8, objectFit: 'cover' }}
@@ -329,6 +355,11 @@ const Create: React.FC = () => {
                       ))}
                     </Space>
                   </Image.PreviewGroup>
+                  {generatedImages?.note && (
+                    <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+                      {generatedImages.note}
+                    </div>
+                  )}
                 </div>
 
                 <Divider />

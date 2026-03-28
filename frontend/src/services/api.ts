@@ -21,10 +21,35 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+export interface GenerateImageRequest {
+  prompt: string;
+  count?: number;
+}
+
+export interface GenerateImageResponse {
+  success: boolean;
+  prompt: string;
+  task_id?: string;
+  images: {
+    id: number;
+    url: string;
+    width: number;
+    height: number;
+  }[];
+  note?: string;
+  error?: string;
+}
+
 export const contentApi = {
   // 生成内容
   generate: async (data: GenerateRequest): Promise<GenerateResponse> => {
     const response = await api.post('/generate', data);
+    return response.data;
+  },
+
+  // 生成图片
+  generateImage: async (data: GenerateImageRequest): Promise<GenerateImageResponse> => {
+    const response = await api.post('/generate-image', data);
     return response.data;
   },
 
