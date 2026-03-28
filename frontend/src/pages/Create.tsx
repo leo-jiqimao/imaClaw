@@ -343,7 +343,7 @@ const Create: React.FC = () => {
                   </label>
                   <Image.PreviewGroup>
                     <Space wrap>
-                      {(generatedImages?.images || result.images.map((url, i) => ({ id: i, url, width: 1024, height: 1024 }))).map((img, index) => (
+                      {(generatedImages?.images ?? result.images.map((url, i) => ({ id: i, url, width: 1024, height: 1024 }))).map((img, index) => (
                         <Image
                           key={index}
                           src={img.url}
