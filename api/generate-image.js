@@ -9,12 +9,8 @@ const API_SERVICE = 'cv';
 // 获取环境变量
 function getCredentials() {
   const accessKeyId = process.env.JIMENG_ACCESS_KEY_ID;
-  const secretKeyRaw = process.env.JIMENG_SECRET_ACCESS_KEY || '';
-  
-  // 如果SecretKey是Base64编码，需要解码
-  const secretAccessKey = secretKeyRaw.includes('=') && secretKeyRaw.length % 4 === 0
-    ? Buffer.from(secretKeyRaw, 'base64').toString('utf-8')
-    : secretKeyRaw;
+  // SecretKey 直接使用，不需要Base64解码
+  const secretAccessKey = process.env.JIMENG_SECRET_ACCESS_KEY || '';
 
   if (!accessKeyId || !secretAccessKey) {
     throw new Error('Missing JIMENG_ACCESS_KEY_ID or JIMENG_SECRET_ACCESS_KEY');
