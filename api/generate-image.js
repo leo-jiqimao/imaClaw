@@ -212,41 +212,51 @@ async function waitForSingleResult(taskId, credentials, maxAttempts = 40) {
   throw new Error('Task timeout');
 }
 
-// 并行生成多张图片（每个任务单独生成一张）
+// 分批并行生成多张图片（限制并发数避免 429）
 async function generateMultipleImages(prompt, count, credentials) {
-  console.log(`Generating ${count} images in parallel...`);
+  console.log(`Generating ${count} images with batch processing...`);
   
-  // 提交所有任务
-  const taskPromises = [];
-  for (let i = 0; i < count; i++) {
-    const enhancedPrompt = count > 1 
-      ? `${prompt}，第${i + 1}张，不同角度`
-      : prompt;
-    taskPromises.push(submitSingleTask(enhancedPrompt, credentials));
-  }
-  
-  const taskIds = await Promise.all(taskPromises);
-  console.log('Task IDs:', taskIds);
-  
-  // 等待所有任务完成
-  const resultPromises = taskIds.map(taskId => 
-    waitForSingleResult(taskId, credentials)
-  );
-  
-  const results = await Promise.all(resultPromises);
-  
-  // 收集所有图片
+  const MAX_CONCURRENT = 3; // 最多 3 个并行任务
   const images = [];
-  results.forEach((result, index) => {
-    if (result.image_urls && result.image_urls.length > 0) {
-      images.push({
-        id: index + 1,
-        url: result.image_urls[0],
-        width: 2048,
-        height: 2048,
-      });
+  
+  // 分批处理
+  for (let batchStart = 0; batchStart < count; batchStart += MAX_CONCURRENT) {
+    const batchEnd = Math.min(batchStart + MAX_CONCURRENT, count);
+    const batchSize = batchEnd - batchStart;
+    
+    console.log(`Processing batch ${batchStart}-${batchEnd}...`);
+    
+    // 提交当前批次任务
+    const taskPromises = [];
+    for (let i = batchStart; i < batchEnd; i++) {
+      const enhancedPrompt = count > 1 
+        ? `${prompt}，第${i + 1}张，不同角度`
+        : prompt;
+      taskPromises.push(submitSingleTask(enhancedPrompt, credentials));
     }
-  });
+    
+    const taskIds = await Promise.all(taskPromises);
+    console.log('Batch task IDs:', taskIds);
+    
+    // 等待当前批次完成
+    const resultPromises = taskIds.map(taskId => 
+      waitForSingleResult(taskId, credentials)
+    );
+    
+    const results = await Promise.all(resultPromises);
+    
+    // 收集当前批次图片
+    results.forEach((result, idx) => {
+      if (result.image_urls && result.image_urls.length > 0) {
+        images.push({
+          id: batchStart + idx + 1,
+          url: result.image_urls[0],
+          width: 2048,
+          height: 2048,
+        });
+      }
+    });
+  }
   
   return images;
 }
