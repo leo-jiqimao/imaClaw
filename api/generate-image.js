@@ -9,8 +9,20 @@ const API_SERVICE = 'cv';
 // 获取环境变量
 function getCredentials() {
   const accessKeyId = process.env.JIMENG_ACCESS_KEY_ID;
-  // SecretKey 直接使用，不需要Base64解码
-  const secretAccessKey = process.env.JIMENG_SECRET_ACCESS_KEY || '';
+  const secretKeyRaw = process.env.JIMENG_SECRET_ACCESS_KEY || '';
+  
+  // SecretKey 是 Base64 编码的，需要解码
+  let secretAccessKey = secretKeyRaw;
+  try {
+    const decoded = Buffer.from(secretKeyRaw, 'base64').toString('utf-8');
+    // 如果解码后是16进制字符串（32字符），说明解码成功
+    if (decoded.length === 32 && /^[a-f0-9]+$/i.test(decoded)) {
+      secretAccessKey = decoded;
+      console.log('SecretKey decoded successfully');
+    }
+  } catch (e) {
+    console.log('SecretKey not base64, using raw');
+  }
 
   if (!accessKeyId || !secretAccessKey) {
     throw new Error('Missing JIMENG_ACCESS_KEY_ID or JIMENG_SECRET_ACCESS_KEY');
