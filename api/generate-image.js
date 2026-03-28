@@ -133,9 +133,14 @@ async function submitTask(prompt, count = 1, credentials) {
   };
   const url = `https://${API_HOST}${path}`;
   
+  // 根据 count 调整 prompt，明确指定生成数量
+  const enhancedPrompt = count > 1 
+    ? `${prompt}，生成${count}张不同角度的图片`
+    : prompt;
+  
   const body = JSON.stringify({
     req_key: 'jimeng_t2i_v40',
-    prompt: prompt,
+    prompt: enhancedPrompt,
     size: 2048 * 2048,
     force_single: count === 1,
   });
