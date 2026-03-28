@@ -3,7 +3,11 @@ const crypto = require('crypto');
 
 // 火山引擎即梦API配置
 const ACCESS_KEY_ID = process.env.JIMENG_ACCESS_KEY_ID;
-const SECRET_ACCESS_KEY = process.env.JIMENG_SECRET_ACCESS_KEY;
+// Secret Key 可能是 Base64 编码的，需要解码
+const SECRET_ACCESS_KEY_RAW = process.env.JIMENG_SECRET_ACCESS_KEY || '';
+const SECRET_ACCESS_KEY = SECRET_ACCESS_KEY_RAW.includes('=') && SECRET_ACCESS_KEY_RAW.length % 4 === 0
+  ? Buffer.from(SECRET_ACCESS_KEY_RAW, 'base64').toString('utf-8')
+  : SECRET_ACCESS_KEY_RAW;
 const API_HOST = 'visual.volcengineapi.com';
 const API_REGION = 'cn-north-1';
 const API_SERVICE = 'cv';
